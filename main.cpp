@@ -1,84 +1,135 @@
 #include "mbed.h"
 
-Thread thread_master;
-Thread thread_slave;
 
-//master
+#define MAXIMUM_BUFFER_SIZE 1
 
-SPI spi(D11, D12, D13); // mosi, miso, sclk
-DigitalOut cs(D9);
 
-SPISlave device(PD_4, PD_3, PD_1, PD_0); //mosi, miso, sclk, cs; PMOD pins
+static DigitalOut led1(LED1); //led1 = PA_5
 
-DigitalOut led(LED3);
+static DigitalOut led2(LED2); //led2 = PB_14
 
-int slave()
-{
-   device.format(8, 3);
-   device.frequency(1000000);
-   //device.reply(0x00); // Prime SPI with first reply
-   while (1)
-   {
-      if (device.receive())
-      {
-            int v = device.read(); // Read byte from master
-            printf("First Read from master: v = %0x\n", v);
-            if (v == 0xAA)
-            {                      //Verify the command
-               v = device.read(); // Read another byte from master
-               printf("Second Read from master: v = %d\n", v);
-               v = v + 10;
-               device.reply(v); // Make this the next reply
-               v = device.read(); // Read again to allow master read back
-               led = !led;      // led turn blue/orange if device receive
-            }
-            else
-            {
-               printf("Default reply to master: 0x00\n");
-               device.reply(0x00); //Reply default value
-            };
+
+Thread thread1;
+
+Thread thread2;
+
+
+static BufferedSerial pc(USBTX, USBRX); // tx, rx
+
+static BufferedSerial device1(D10, D9); // tx, rx  D10:tx  D9:rx
+
+static BufferedSerial device2(D1, D0);  // tx, rx   D1:tx   D0:rx
+
+
+void master_thread(){
+
+   while (1){
+
+      char buf[MAXIMUM_BUFFER_SIZE] = {0};
+
+      if (pc.readable()){
+
+         pc.read(buf, 1);
+
+         device1.write(buf, 1);
+
       }
+
+      else{
+
+         char buf1[MAXIMUM_BUFFER_SIZE] = {'0'};
+
+         device1.write(buf1, 1);
+
+      }
+
+
+   ThisThread::sleep_for(5ms);
+
    }
+
 }
 
-void master()
-{
-   int number = 0;
 
-   // Setup the spi for 8 bit data, high steady state clock,
-   // second edge capture, with a 1MHz clock rate
-   spi.format(8, 3);
-   spi.frequency(1000000);
+void slave_thread(){
 
-   for(int i=0; i<5; ++i){ //Run for 5 times
-      // Chip must be deselected
-      cs = 1;
-      // Select the device by seting chip select low
-      cs = 0;
+   led1 = 0;
 
-      printf("Send handshaking codes.\n");
+   led2 = 0;
 
-      int response = spi.write(0xAA); //Send ID
-      cs = 1;                       // Deselect the device
-      ThisThread::sleep_for(100ms); //Wait for debug print
-      printf("First response from slave = %d\n", response);
 
-      // Select the device by seting chip select low
-      cs = 0;
-      printf("Send number = %d\n", number);
+   while (1){
 
-      spi.write(number); //Send number to slave
-      ThisThread::sleep_for(100ms); //Wait for debug print
-      response = spi.write(number); //Read slave reply
-      ThisThread::sleep_for(100ms); //Wait for debug print
-      printf("Second response from slave = %d\n", response);
-      cs = 1; // Deselect the device
-      number += 1;
+      char buf2[MAXIMUM_BUFFER_SIZE] = {0};
+
+      if (device2.readable()){
+
+         device2.read(buf2, 1);
+
+
+         if (buf2[0] == '1'){
+
+            led1 = 1;
+
+            led2 = 0;
+
+         }
+
+         else if (buf2[0] == '2'){
+
+            led1 = 0;
+
+            led2 = 1;
+
+         }
+
+      else{
+
+         led1 = 0;
+
+         led2 = 0;
+
+      }
+
+      pc.write(buf2, 1);
+
+      }
+
    }
+
 }
 
-int main()
-{
-   thread_slave.start(slave);
-   thread_master.start(master);
+
+int main(){
+
+   // Set desired properties (9600-8-N-1).
+
+   device1.set_baud(9600);
+
+   device1.set_format(
+
+      /* bits */ 8,
+
+      /* parity */ BufferedSerial::None,
+
+      /* stop bit */ 1);
+
+
+   // Set desired properties (9600-8-N-1).
+
+   device2.set_baud(9600);
+
+   device2.set_format(
+
+      /* bits */ 8,
+
+      /* parity */ BufferedSerial::None,
+
+      /* stop bit */ 1);
+
+
+   thread1.start(master_thread);
+
+   thread2.start(slave_thread);
+
 }
